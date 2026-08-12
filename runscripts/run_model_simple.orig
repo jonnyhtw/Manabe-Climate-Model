@@ -1,0 +1,185 @@
+#!/bin/csh
+module purge
+module load ifort/11.1.073
+module load intel_compilers
+module use /home/sdu/publicmodules
+module load netcdf/4.1.3s
+module load hdf5/1.8.6
+set echo
+set bomb = 0
+set tarball_path = "~/test_MCM"
+set runscript_path = $tarball_path/runscripts
+set model_code_path = $tarball_path/model_code
+set model_input_path = $tarball_path/model_input_files
+set restart_path = "$tarball_path/restart"
+set model_run = /net/rjs/temp
+\rm -r $model_run/*
+cd $model_run
+mkdir -p model/atm
+cd model/atm
+cp $model_code_path/atm_lib/*.[fFh] .
+cp $model_code_path/ocn_lib/conblk.h .
+   /bin/rm ocean.F passup.F
+set aopt1 = '-D r30 -D k14 -D atmcpld -D cpldleg3 -D cldht93 -D consrv_ps -D co2_360 -D internal_fft'
+set aopt2 = ' -D wall_clock_time -D elmix4900 -D hydrol -D impcit -D moist -D new_cld_absor -D no_kflags_k1'
+set aopt3 = ' -D no_neg_in_vertdf -D no_reset_tmean -D old_levels -D part_black_cirrus -D prdcld -D rad'
+set aopt4 = ' -D seanal -D sponge -D unitsk -D varhy -D wet_ep_exp -D dmptop20 -D new_rhxinv -D tmean_warm '
+set aopt = "$aopt1 $aopt2 $aopt3 $aopt4"
+ifort -stack_temps -safe_cray_ptr -override_limits -ftz -i_dynamic -assume byterecl -O2 -i4 -r8 -w95 -c $aopt *.[fF]
+cp *.o ..
+cd ..
+mkdir ocn
+cd ocn
+cp  $model_code_path/ocn_lib/*.[hfF] .
+#
+#
+#
+  set opt1 = '-Dworldocn -Drigidlid -Dislands -Dhypergrid -Ddiskless -Df90type'
+  set opt2 = '-Dcyclic -Dfourfil -Dbumpkmu -Dkm18 -Docnr30 '
+  set opt3 = '-Dconsthmix -Disopycmix -Dblhmix -Dconstvmix -Dblvmix -Dinland'
+  set opt4 = '-Dkeepterms -Dseaice'
+  set opt5 = '-Dselfdoc -Dsfctopog -Dreadrmsk -Dkdtravg -Dkdtermb -Dtestnorth -Dzonalavg'
+  set opt6 = '-Donetoone -Dgtime -Doldtime'
+   set opt7 = '-Dagetracers -Dseasonal -Dcpldleg3 -Damazon -Docncpld'
+#
+  echo " opt1 = $opt1 "
+  echo " opt2 = $opt2 "
+  echo " opt3 = $opt3 "
+  echo " opt4 = $opt4 "
+  echo " opt5 = $opt5 "
+  echo " opt6 = $opt6 "
+  echo " opt7 = $opt7 "
+#
+   cp ../../model/atm/asblck.h .
+   cp ../../model/atm/ascoma.h .
+   cp ../../model/atm/ascomo.h .
+   cp ../../model/atm/cexpnam.h .
+   #
+   if ( -e denscoef.F ) /bin/rm denscoef.F
+   #
+   echo ">>>>>== COMPILING OCEAN CODE ==<<<<< "
+   ifort -stack_temps -safe_cray_ptr -override_limits -ftz -i_dynamic -assume byterecl -O2 -i4 -r8 -w95 -c $opt1 $opt2 $opt3 $opt4 $opt5 $opt6 $opt7 *.[fF]
+   \rm ordleg.o
+   cp *.o ..
+cd ..
+ifort -stack_temps -safe_cray_ptr -override_limits -ftz -i_dynamic -assume byterecl -O2 -i4 -r8 -w95 *.o -lhdf5 -lhdf5_hl -lnetcdf -lnetcdff -o ctrs_06
+set nyear = 1
+set endyear = 1
+set endmonth = 1
+set lastmonth = 12
+set restart_path_lat = "$restart_path/initial"
+set prinito = "true"
+while ($nyear <= $endyear)
+   #
+   #
+   set imonth = 1
+   while ($imonth <= $endmonth)
+      #
+      #
+      dmget $restart_path_lat/*.nc
+      cp $restart_path_lat/sstyce_r30.nc sstyce_r30_in.nc
+      cp $restart_path_lat/atmos_r30.nc atmos_r30_in.nc
+      cp $restart_path_lat/atm.intgls.r30 fort.77
+      cp $restart_path_lat/sealevel_r30.nc sealevel_r30_in.nc
+      cp $model_input_path/alb_kukla_r30.nc .
+      cp $model_input_path/ijrnf_r30.nc .
+      cp $model_input_path/zstarvar_r30.nc .
+      cp $restart_path_lat/ocean_r30.nc ocean_r30_in.nc
+      cp $model_input_path/regionmasks .
+      cp $model_input_path/northmasks .
+      cp $model_input_path/terrserr_r30.nc .
+      #
+      #
+      mkdir read_ctl
+      cd read_ctl
+      cp $model_code_path/read_ctl/*.[fFh] .
+      ifort -stack_temps -safe_cray_ptr -override_limits -ftz -i_dynamic -assume byterecl -O2 -i4 -r8 -w95 *.[fF] -lhdf5 -lhdf5_hl -lnetcdf -lnetcdff 
+      cp a.out ../readr
+      cd ..
+      echo "  71" > fort.5
+      readr < fort.5
+      set irt = `cat irt.data`
+      setenv model_month `cat month.data`
+      set iyear = `cat iyear.data`
+      #
+      #
+      @ yyear = $iyear
+      setenv model_year $yyear
+      #
+      #
+      set count = 1
+      #
+        set month_list = (jan feb mar apr may jun jul aug sep oct nov dec)
+        set days_list = (31 28 31 30 31 30 31 31 30 31 30 31)
+        set model_month = $month_list[$imonth]
+        set ndays = $days_list[$imonth]
+set nnyear = $iyear
+        setenv model_year $nnyear
+      while ($month_list[$count] != $model_month)
+         @ count = $count + 1
+      end
+   #
+         if ($count > 12) then
+            echo "We have problems. count > 12, count= $count"
+            exit
+         endif
+         set ndays = $days_list[$count]
+      #
+      #
+      #
+      #
+      set alpha = 0.04          # Robert smoothing constant in the atmos model
+      set dt = 216.0            # atmos model timestep in seconds
+      set rk0 = 0.22e-6         # gravity wave drag
+   #
+      set co2_equil = 360.0     # reference equilibrium CO2 from initial conditions [ppm]
+      set co2day_int = 5475   # ??? day number corresponding
+#
+   #
+   echo "ctrs_06   "                                     > fort.5
+   echo " &INDAT1 irt=$irt, NDAYS=$ndays         &END"  >> fort.5
+   echo " &INDAT2 ALPHA=$alpha, DT=$dt, RK0=$rk0 &END"  >> fort.5
+   echo " &INDAT3 intdk=10,ioprt=999999,intpr=80,intzm=80 &END"  >> fort.5
+   echo " &INHCO2 co2_equil=$co2_equil, co2day_int=$co2day_int  &END" >> fort.5
+   #
+   cat fort.5
+   set nyrdiag = 1        # interval of ocean model years for diagnostics
+   set nyrtavg = 1        # interval of ocean model years for tracer avgs
+   set nyears = 1         # number of years to run the ocean model each execution
+   set nyrdiag = `expr $nyrdiag \* 365 `
+   set nyrtavg = `expr $nyrtavg \* 365 `
+   set ndayso = $ndays
+      set ninit = ".false."
+   #
+   cat > ocean.in << DELIMIT
+ &contrl init=$ninit,  restrt=.true., avterm=0.,
+         nmix=17,      eb=.true.,  ncon=6,  pintro=$prinito,
+         days=$ndayso, tsi=0.0416, dgnstc=5.0, travg=5.,
+         histt=1.0,    snaps=99.9e9, prdiag=30.0,
+         nsteps=48,                             &end
+ &eddy   am=1.2e9,   fkpm=30.0,  aidif=1.0,
+         ah=0.4e7,  ahisop=1.0, slmxr=100.0,
+         cdbot=0.001,
+         afkph=0.65, dfkph=.74, sfkph=4.5e-5, zfkph=2500e2 &end
+ &tsteps dtts=1800., dtuv=1800., dtsf=1800.,    &end
+ &parms  mxscan=350, sor=1.575,  crit=.15e7,
+         acor=0.0                               &end
+ &iland  alonis=110.0, alatis=-85.0,            &end
+DELIMIT
+   #
+   echo ">>>>>== CONTENTS OF ocean.in ==<<<<< "
+   cat ocean.in
+      #
+      #
+       ctrs_06 < fort.5 > printout || set bomb = 1
+       if ($bomb < 0) cp printout $runscript_path/printout.new
+      #
+      #
+      #
+      @ imonth = $imonth + 1
+      set first_run = 0
+      set init = 0
+      set ninit = ".false."
+      set prinito = ".false."
+      #
+   end
