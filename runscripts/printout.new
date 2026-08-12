@@ -165,7 +165,7 @@
 
 
 
- accumulated c.p.u. time since beginning of run 0.00000E+00                         elapsed c.p.u. time since last call 0.00000E+00
+ accumulated c.p.u. time since beginning of run 0.10000E+01                         elapsed c.p.u. time since last call 0.10000E+01
  zero arrays for storing boundary data for ocean at ktau=  63626800
 
  ocean boundary data loaded at ktau =   63626800  to =  0.17920401E+02  yce =  0.11579133E+02
@@ -763,7 +763,7 @@
    seasonal       selfdoc        zonalavg    
  end of options list.
 
-        -128       32565
+        -128       32574
 1          error stop at statement number        20
  The control block: 
    ctrs_06             63626880********************      1080        41        410.7665E+06  63629280

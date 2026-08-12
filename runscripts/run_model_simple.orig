@@ -70,12 +70,8 @@ set lastmonth = 12
 set restart_path_lat = "$restart_path/initial"
 set prinito = "true"
 while ($nyear <= $endyear)
-   #
-   #
    set imonth = 1
    while ($imonth <= $endmonth)
-      #
-      #
       dmget $restart_path_lat/*.nc
       cp $restart_path_lat/sstyce_r30.nc sstyce_r30_in.nc
       cp $restart_path_lat/atmos_r30.nc atmos_r30_in.nc
@@ -88,8 +84,6 @@ while ($nyear <= $endyear)
       cp $model_input_path/regionmasks .
       cp $model_input_path/northmasks .
       cp $model_input_path/terrserr_r30.nc .
-      #
-      #
       mkdir read_ctl
       cd read_ctl
       cp $model_code_path/read_ctl/*.[fFh] .
