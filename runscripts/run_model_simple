@@ -7,7 +7,7 @@ module load jaspy
 
 set echo
 set bomb = 0
-set tarball_path    = "$HOME/test_MCM"
+set tarball_path    = "$PWD"
 set runscript_path  = "$tarball_path/runscripts"
 set model_code_path = "$tarball_path/model_code"
 set model_input_path = "$tarball_path/model_input_files"
