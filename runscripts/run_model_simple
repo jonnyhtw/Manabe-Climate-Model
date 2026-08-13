@@ -12,7 +12,7 @@ set runscript_path  = "$tarball_path/runscripts"
 set model_code_path = "$tarball_path/model_code"
 set model_input_path = "$tarball_path/model_input_files"
 set restart_path    = "$tarball_path/restart"
-set model_run       = "$tarball_path/run_dir"
+set model_run       = "$tarball_path/_run_dir"
 
 mkdir -p $model_run
 \rm -rf $model_run/*
