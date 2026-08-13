@@ -14,9 +14,9 @@ set model_input_path = "$tarball_path/model_input_files"
 set restart_path    = "$tarball_path/restart"
 set model_run       = "$tarball_path/_run_dir"
 
-mkdir -p $model_run
-\rm -rf $model_run/*
-cd $model_run
+if ( -d "$model_run" ) \rm -rf "$model_run"
+mkdir -p "$model_run"
+cd "$model_run"
 
 # --- Compiler & NetCDF setup for JASMIN ---
 set FC = "gfortran"
