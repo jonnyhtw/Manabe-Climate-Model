@@ -471,30 +471,23 @@ c     list code options chosen by user for this model run
 c-----------------------------------------------------------------------
 c
       call docmnt (stdout, .false., .false., .false., .false.)
-      write(6,*) '>>> DEBUG 1: Returned from docmnt'
-      call flush(6)
-
+c
+c-----------------------------------------------------------------------
+c     open the disk datasets
+c-----------------------------------------------------------------------
+c
       nbuf = 2
 #ifdef crayio
+c  nblk=512 because minimum block length is 2 (=512/512+1) in call wopen.
+c  nblk=2  gives: UT009 - WARNING - BUFFERS REQUESTED .LT. MINIMUM,
+c  DEFAULT USED (default is 2).
       call ostart (kontrl, nvar11, 512, 1)
 #else
       call ostart (kontrl, nvar11, nvar11, 1)
 #endif
-      write(6,*) '>>> DEBUG 2: Passed ostart kontrl'
-      call flush(6)
-
       call ostart (kflds, nkflds*nwds, nwds, 1)
-      write(6,*) '>>> DEBUG 3: Passed ostart kflds'
-      call flush(6)
-
       call ostart (labs(1), jmt*nslab, nslab, nbuf)
-      write(6,*) '>>> DEBUG 4: Passed ostart labs(1)'
-      call flush(6)
-
       call ostart (labs(2), jmt*nslab, nslab, nbuf)
-      write(6,*) '>>> DEBUG 5: Passed ostart labs(2)'
-      call flush(6)
-
 #ifdef twoslabdisks
       if (ntlev .eq. 3) then
         call ostart (labs(3), jmt*nslab, nslab, nbuf)
@@ -502,8 +495,6 @@ c
 #else
       call ostart (labs(3), jmt*nslab, nslab, nbuf)
 #endif
-      write(6,*) '>>> DEBUG 6: Passed ostart labs(3)'
-      call flush(6)
 c
 c
 c=======================================================================
