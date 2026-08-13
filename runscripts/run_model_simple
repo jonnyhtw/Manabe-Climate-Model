@@ -20,7 +20,7 @@ cd "$model_run"
 
 # --- Compiler & NetCDF setup for JASMIN ---
 set FC = "gfortran"
-set FFLAGS = "-O0 -g -fbacktrace -cpp -ffixed-form -fdefault-real-8 -fdefault-double-8 -fallow-argument-mismatch -std=legacy -fdec -Wno-array-bounds"
+set FFLAGS = "-O0 -g -fbacktrace -cpp -ffixed-form -fdefault-real-8 -fdefault-double-8 -fallow-argument-mismatch -std=legacy -fdec -Wno-array-bounds -fno-automatic -finit-local-zero"
 set FFLAGS_READCTL = "-O0 -g -fbacktrace -cpp -ffixed-form -fallow-argument-mismatch -std=legacy -fdec"
 
 set INC_DIR = ""
@@ -180,6 +180,7 @@ while ($nyear <= $endyear)
       echo " &INDAT2 ALPHA=$alpha, DT=$dt, RK0=$rk0 &END"  >> fort.5
       echo " &INDAT3 intdk=10,ioprt=999999,intpr=80,intzm=80 &END"  >> fort.5
       echo " &INHCO2 co2_equil=$co2_equil, co2day_int=$co2day_int  &END" >> fort.5
+      echo "" >> fort.5
 
       cat fort.5
 
@@ -213,6 +214,7 @@ DELIMIT
       echo ">>>>>== CONTENTS OF ocean.in ==<<<<< "
       cat ocean.in
 
+      sync
       ./ctrs_06 < fort.5 > printout || set bomb = 1
 
       if ($bomb != 0) then
