@@ -1,5 +1,8 @@
 #!/bin/csh
 
+
+# To run this on JASMIN, cd to the root dir of the repo and then run (1) ./runscripts/run_model_simple or sbatch runscripts/batch.sl
+
 module purge
 # module load ifort/11.1.073
 # module load intel_compilers
