@@ -1,3 +1,6 @@
 *.doc
+*.out
+*.err
+.ipynb_checkpoints
 printout*
 *run_dir
