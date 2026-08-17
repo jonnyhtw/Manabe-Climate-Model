@@ -1,13 +1,18 @@
 #!/bin/csh
 
-module purge
-module load ifort/11.1.073
-module load intel_compilers
-#module load netcdf/4.0.1
-module use /home/sdu/publicmodules
-module load netcdf/4.1.3s
-module load hdf5/1.8.6
 
+# To run this on JASMIN, cd to the root dir of the repo and then run (1) ./runscripts/run_model_simple or sbatch runscripts/batch.sl
+
+module purge
+# module load ifort/11.1.073
+# module load intel_compilers
+#module load netcdf/4.0.1
+# module use /home/sdu/publicmodules
+# module load netcdf/4.1.3s
+# module load hdf5/1.8.6
+
+module load jasmin-sci
+module load jaspy
 # This runscript uses the csh (c-shell).
 
 # User must set path to where tarball was extracted to point to model_code, runscripts and model input data.
@@ -19,19 +24,37 @@ module load hdf5/1.8.6
 set echo
 set bomb = 0
 
-set tarball_path = "~/test_MCM"
+set tarball_path = "$PWD"
 set runscript_path = $tarball_path/runscripts
 set model_code_path = $tarball_path/model_code
 set model_input_path = $tarball_path/model_input_files
 set restart_path = "$tarball_path/restart"
 
-set model_run = /net/rjs/temp
+set model_run = $tarball_path/_run_dir
 
-\rm -r $model_run/*
-
-cd $model_run
+if ( -d "$model_run" ) rm -rf "$model_run"
+mkdir -p "$model_run"
+cd "$model_run"
 
 #compile model code
+# --- Compiler & NetCDF setup for JASMIN ---
+set FC = "gfortran"
+set FFLAGS = "-O0 -g -fbacktrace -cpp -ffixed-form -fdefault-real-8 -fdefault-double-8 -fallow-argument-mismatch -std=legacy -fdec -Wno-array-bounds -fno-automatic -finit-local-zero"
+set FFLAGS_READCTL = "-O0 -g -fbacktrace -cpp -ffixed-form -fallow-argument-mismatch -std=legacy -fdec"
+
+set INC_DIR = ""
+if ( `which nf-config` != "" ) then
+    set INC_DIR = `nf-config --includedir`
+    set LIB_NETCDF = "`nf-config --flibs` -Wl,-rpath,`nf-config --prefix`/lib"
+endif
+if ( "$INC_DIR" == "" || ! -e "$INC_DIR/netcdf.inc" ) then
+    set INC_DIR = `find /apps/jasmin /opt/rh /usr -name "netcdf.inc" 2>/devnull | grep -v "intel" | head -n 1 | xargs dirname`
+    if ( "$INC_DIR" != "" ) then
+        set LIB_DIR = `dirname $INC_DIR`/lib
+        set LIB_NETCDF = "-L$LIB_DIR -lnetcdff -lnetcdf -Wl,-rpath,$LIB_DIR"
+    endif
+endif
+set INC_NETCDF = "-I$INC_DIR"
 
 #compile atm
 mkdir -p model/atm
@@ -41,6 +64,9 @@ cd model/atm
 cp $model_code_path/atm_lib/*.[fFh] .
 cp $model_code_path/ocn_lib/conblk.h .
 
+sed -i -E 's/^[ \t]*include[ \t]+["'\''"]([^"'\'']+)["'\''"]/#include "\1"/i' *.[fF] *.[hH]
+sed -i 's/#include .netcdf.inc./#include "netcdf.inc"/g' *.[fF] *.[hH]
+sed -i '/nday.*=.*ifcst.*\/.*isecday/i \      if (isecday .eq. 0) isecday = 86400' atmos.F
 #SGI - remove unneccessary files
    /bin/rm ocean.F passup.F
 
@@ -51,7 +77,7 @@ set aopt3 = ' -D no_neg_in_vertdf -D no_reset_tmean -D old_levels -D part_black_
 set aopt4 = ' -D seanal -D sponge -D unitsk -D varhy -D wet_ep_exp -D dmptop20 -D new_rhxinv -D tmean_warm '
 set aopt = "$aopt1 $aopt2 $aopt3 $aopt4"
 
-ifort -stack_temps -safe_cray_ptr -override_limits -ftz -i_dynamic -assume byterecl -O2 -i4 -r8 -w95 -c $aopt *.[fF]
+$FC $FFLAGS $INC_NETCDF $aopt -c *.[fF]
 
 cp *.o ..
 
@@ -248,7 +274,7 @@ cp  $model_code_path/ocn_lib/*.[hfF] .
    if ( -e denscoef.F ) /bin/rm denscoef.F
    #
    echo ">>>>>== COMPILING OCEAN CODE ==<<<<< "
-   ifort -stack_temps -safe_cray_ptr -override_limits -ftz -i_dynamic -assume byterecl -O2 -i4 -r8 -w95 -c $opt1 $opt2 $opt3 $opt4 $opt5 $opt6 $opt7 *.[fF]
+$FC $FFLAGS $INC_NETCDF $opt1 $opt2 $opt3 $opt4 $opt5 $opt6 $opt7 -c *.[fF]
 # ordleg all ready in atm *.o files
    \rm ordleg.o
    cp *.o ..
@@ -257,7 +283,7 @@ cp  $model_code_path/ocn_lib/*.[hfF] .
 
 cd ..
 
-ifort -stack_temps -safe_cray_ptr -override_limits -ftz -i_dynamic -assume byterecl -O2 -i4 -r8 -w95 *.o -lhdf5 -lhdf5_hl -lnetcdf -lnetcdff -o ctrs_06
+$FC $FFLAGS *.o $LIB_NETCDF -o ctrs_06
 
 
 
@@ -315,8 +341,10 @@ while ($nyear <= $endyear)
       cd read_ctl
       # Read_ctl src code
       cp $model_code_path/read_ctl/*.[fFh] .
+      sed -i -E 's/^[ \t]*include[ \t]+["'\''"]([^"'\'']+)["'\''"]/#include "\1"/i' *.[fF] *.[hH]
+      sed -i 's/#include .netcdf.inc./#include "netcdf.inc"/g' *.[fF] *.[hH]
 
-      ifort -stack_temps -safe_cray_ptr -override_limits -ftz -i_dynamic -assume byterecl -O2 -i4 -r8 -w95 *.[fF] -lhdf5 -lhdf5_hl -lnetcdf -lnetcdff 
+      $FC $FFLAGS_READCTL $INC_NETCDF *.[fF] $LIB_NETCDF -o a.out
 
 
       cp a.out ../readr
@@ -324,7 +352,7 @@ while ($nyear <= $endyear)
 
       echo "  71" > fort.5
 
-      readr < fort.5
+      ./readr < fort.5
       set irt = `cat irt.data`
       setenv model_month `cat month.data`
       set iyear = `cat iyear.data`
@@ -396,6 +424,7 @@ set nnyear = $iyear
    echo " &INDAT2 ALPHA=$alpha, DT=$dt, RK0=$rk0 &END"  >> fort.5
    echo " &INDAT3 intdk=10,ioprt=999999,intpr=80,intzm=80 &END"  >> fort.5
    echo " &INHCO2 co2_equil=$co2_equil, co2day_int=$co2day_int  &END" >> fort.5
+   echo "" >> fort.5
    #
    cat fort.5
 
@@ -441,7 +470,8 @@ DELIMIT
       # =========>>>>>>>>>> Run the model <<<<<<<<<<=========
       # =====================================================
       #
-       ctrs_06 < fort.5 > printout || set bomb = 1
+      sync
+      ./ctrs_06 < fort.5 > printout || set bomb = 1
 
        if ($bomb < 0) cp printout $runscript_path/printout.new
       #
