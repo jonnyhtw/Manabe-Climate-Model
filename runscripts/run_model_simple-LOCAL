@@ -1,4 +1,26 @@
-#!/bin/tcsh
+#!/bin/csh
+
+setenv PATH "/opt/homebrew/opt/gnu-sed/libexec/gnubin:$PATH"
+
+# To run this on JASMIN, cd to the root dir of the repo and then run (1) ./runscripts/run_model_simple or sbatch runscripts/batch.sl
+
+# module purge
+# module load ifort/11.1.073
+# module load intel_compilers
+#module load netcdf/4.0.1
+# module use /home/sdu/publicmodules
+# module load netcdf/4.1.3s
+# module load hdf5/1.8.6
+
+# module load jasmin-sci
+# module load jaspy
+# This runscript uses the csh (c-shell).
+
+# User must set path to where tarball was extracted to point to model_code, runscripts and model input data.
+
+# User must also set path to directory in which the test run is to be performed.
+
+# This script runs the model 1 month and copies the printout back to the directory containing the runscripts. The user can compare the new results with the provided results. Unfortunately there is no easy way to detemine if the answers are good.
 
 set echo
 set bomb = 0
@@ -15,29 +37,41 @@ if ( -d "$model_run" ) rm -rf "$model_run"
 mkdir -p "$model_run"
 cd "$model_run"
 
-# --- Compiler & NetCDF setup for macOS (Homebrew) ---
+#compile model code
+# --- Compiler & NetCDF setup for JASMIN ---
 set FC = "gfortran"
 set FFLAGS = "-O0 -g -fbacktrace -cpp -ffixed-form -fdefault-real-8 -fdefault-double-8 -fallow-argument-mismatch -std=legacy -fdec -Wno-array-bounds -fno-automatic -finit-local-zero"
 set FFLAGS_READCTL = "-O0 -g -fbacktrace -cpp -ffixed-form -fallow-argument-mismatch -std=legacy -fdec"
 
-set INC_DIR = `nf-config --includedir`
+set INC_DIR = ""
+if ( `which nf-config` != "" ) then
+    set INC_DIR = `nf-config --includedir`
+    set LIB_NETCDF = "`nf-config --flibs` -L/opt/homebrew/lib -Wl,-rpath,/opt/homebrew/lib -Wl,-rpath,`nf-config --prefix`/lib"
+endif
+if ( "$INC_DIR" == "" || ! -e "$INC_DIR/netcdf.inc" ) then
+    set INC_DIR = `find /apps/jasmin /opt/rh /usr /opt/homebrew -name "netcdf.inc" 2>/devnull | grep -v "intel" | head -n 1 | xargs dirname`
+    if ( "$INC_DIR" != "" ) then
+        set LIB_DIR = `dirname $INC_DIR`/lib
+        set LIB_NETCDF = "-L$LIB_DIR -L/opt/homebrew/lib -lnetcdff -lnetcdf -Wl,-rpath,$LIB_DIR -Wl,-rpath,/opt/homebrew/lib"
+    endif
+endif
 set INC_NETCDF = "-I$INC_DIR"
-set LIB_NETCDF = "`nf-config --flibs`"
 
-# compile atm
+#compile atm
 mkdir -p model/atm
 cd model/atm
+#cp ~/climatemodel/r30/coupled/ctrs_06/libraries/atm_lib/*.[fFh] .
+#cp ~/climatemodel/r30/coupled/ctrs_06/libraries/ocn_lib/conblk.h .
 cp $model_code_path/atm_lib/*.[fFh] .
 cp $model_code_path/ocn_lib/conblk.h .
 
-# BSD sed fixes for macOS
-sed -i '' -E 's/^[ \t]*include[ \t]+["'\''"]([^"'\'']+)["'\''"]/#include "\1"/i' *.[fF] *.[hH]
-sed -i '' 's/#include .netcdf.inc./#include "netcdf.inc"/g' *.[fF] *.[hH]
-sed -i '' '/nday.*=.*ifcst.*\/.*isecday/i \
-      if (isecday .eq. 0) isecday = 86400' atmos.F
+sed -i -E 's/^[ \t]*include[ \t]+["'\''"]([^"'\'']+)["'\''"]/#include "\1"/i' *.[fF] *.[hH]
+sed -i 's/#include .netcdf.inc./#include "netcdf.inc"/g' *.[fF] *.[hH]
+sed -i '/nday.*=.*ifcst.*\/.*isecday/i \      if (isecday .eq. 0) isecday = 86400' atmos.F
+#SGI - remove unneccessary files
+   /bin/rm ocean.F passup.F
 
-/bin/rm ocean.F passup.F
-
+#atm ifdef options
 set aopt1 = '-D r30 -D k14 -D atmcpld -D cpldleg3 -D cldht93 -D consrv_ps -D co2_360 -D internal_fft'
 set aopt2 = ' -D wall_clock_time -D elmix4900 -D hydrol -D impcit -D moist -D new_cld_absor -D no_kflags_k1'
 set aopt3 = ' -D no_neg_in_vertdf -D no_reset_tmean -D old_levels -D part_black_cirrus -D prdcld -D rad'
@@ -45,132 +79,381 @@ set aopt4 = ' -D seanal -D sponge -D unitsk -D varhy -D wet_ep_exp -D dmptop20 -
 set aopt = "$aopt1 $aopt2 $aopt3 $aopt4"
 
 $FC $FFLAGS $INC_NETCDF $aopt -c *.[fF]
+
 cp *.o ..
 
 # compile ocean
 cd ..
 mkdir ocn
 cd ocn
-cp $model_code_path/ocn_lib/*.[hfF] .
+cp  $model_code_path/ocn_lib/*.[hfF] .
+############ start of ocn_ifdefs_sub ###################
+#
+# (GFDL Climate Group Local Mods Indicated by "+")
+#
+#  assumes script variable "t90_init" has been set to 1 or 0
+#
+# -----------------------------------------------------------------------------
+# ============
+# === opt1 === some basic ocean model configuration options
+# ============
+# + worldocn   = make available options developed for GFDL world ocean runs
+# >> external mode velocity options <<
+#   rigidlid   = use relaxation method for barotropic mode
+#    islands     = include islands in relaxation topography
+#    hypergrid   = successive over-relaxation on diagonals
+#    oldrelax    = original sequential relaxation
+#    congrad5pt  = 5 point preconditioned conjugate gradient scheme
+#    congrad9pt  = 9 point preconditioned conjugate gradient scheme
+# >> i/o options <<
+#   diskless   = simulate disk storage using memory array
+#   crayio     = getwa & putwa i/o for now
+#   fio        = fortran direct access i/o
+# +  twoslabdisks = use 2 slab disk units to save disk space
+# + f90type    = use ogeti and oputi i/o for integers
+# -----------------------------------------------------------------------------
+#SGI
+  set opt1 = '-Dworldocn -Drigidlid -Dislands -Dhypergrid -Ddiskless -Df90type'
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# ============
+# === opt2 === grid related options
+# ============
+# >> grid related options<<
+#   cyclic     = east-west cyclic conditions are set
+#   fourfil    = fourier filter predicted variables at high latitudes
+# +  cyberfil    = set filtering lats to match previous Cyber runs
+# + bumpkmu    = modify kmu values in filter areas
+# + km12       = use 12-level depths from previous cyber runs
+# + km18       = use 18-level depths
+# +  old_dzt     = dzt for km18 levels, dzt(1)=32m
+# + km25       = use 25-level depths
+# + ocnr15     = match ocean grid with rhomboidal 15 spectral
+#              grid for atmospheric climate model 2:1
+# + ocnr30     = match ocean grid with rhomboidal 30 spectral
+#              grid for atmospheric climate model 2:1
+# -----------------------------------------------------------------------------
+  set opt2 = '-Dcyclic -Dfourfil -Dbumpkmu -Dkm18 -Docnr30 '
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# ============
+# === opt3 === mixing  options
+# ============
+# >> mixing options <<
+#   consthmix   = constant horizontal mixing del**2
+#   isopycmix   = orient tracer diffusion along isopycnals
+# +  blhmix       = make horizontal diffusion coeff vary with
+#                 depth using the relationship of Bryan & Lewis
+#                 (must be used with constvmix or isopycmix defined)
+# +  cyberAH      = set AHisop as in cyber code
+# +  sameAH       = set AHisop = bkgrd AH at all k-levels
+# +  sameFKPH     = set constant vertical tracer mixing
+# +  noAH         = set coefficients to zero for isopycmix
+#   constvmix   = constant vertical mixing
+# +  blvmix       = make vertical diffusion coefficient vary with
+#                 depth using the relationship of Bryan & Lewis
+# +  oldahv       = vertical diffusion 0.3 (k=1) to 1.3 (k=kmt)
+#   implicitvmix= implicit treatment of vertical mixing
+# + inland      = enable communication with inland seas
+# -----------------------------------------------------------------------------
+  set opt3 = '-Dconsthmix -Disopycmix -Dblhmix -Dconstvmix -Dblvmix -Dinland'
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# ============
+# === opt4 === some prognostic computation options
+# ============
+# >> prognostic computation options <<
+#   keepterms  = use arrays (instead of statement functions) to
+#                retain terms in momentum and tracer equations
+#   nohilats   = no advective metric terms in the momentum
+#                equations.(ie: tropical model domains)
+# + seaice     = include computation of sea ice
+# + noadvection= ignore advection of tracers (debugging)
+# -----------------------------------------------------------------------------
+  set opt4 = '-Dkeepterms -Dseaice'
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# ============
+# === opt5 === diagnostics options
+# ============
+# + selfdoc    = self documenting history data for analysis
+# +  sfctopog    = put diagnostic sea level variations onto selfdoc history tape
+# + readrmsk   = read in region info from file "regionmasks"
+# + kdtravg    = write regional tracer average info for offine analysis
+# + kdtermb    = write regional tracer term balance info for offine analysis
+# + testnorth  = compute basin northward transports for globe, Atlantic&Arctic,
+#                and Indo-Pacific and output for offine analysis
+# + zonalavg   = compute and printout tracers and u, v & w as zonal averages
+#   testcfl    = monitors velocities & checks for cfl violations'
+#     cflj       = print u, v, w for all k at row j for cfl'
+# + testrelx   = store and print info for relaxation scheme (debugging)
+# ------------------------------------------------------------------------------
+  set opt5 = '-Dselfdoc -Dsfctopog -Dreadrmsk -Dkdtravg -Dkdtermb -Dtestnorth -Dzonalavg'
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# ============
+# === opt6 === timestepping related options
+# ============
+# + onetoone   = set dtxcel variable to 1.0 all all k-levels
+#                (default is for worldocn runs accelerate to 10x)
+# + old_dtxcel = timestep multipliers for max dtxcel=10
+# + gtime      = use KDs time manager developed for G-group
+# +  gotogtime   = read in old non-gtime restart file but run
+# +                using gtime and write out gtime type restart
+# +  cpldinit    = resets gtime time indicators to initial conditions when
+#                  starting a coupled model from a pre-existing restart file
+# + oldtime    = replicate calendar cycle of Cyber runs
+# + january    = used for perpetual january test case
+# + yearzero   = set year0 = 0 (not 1) to agree with prev runs
+# -----------------------------------------------------------------------------
+#SGI
+  set opt6 = '-Donetoone -Dgtime -Doldtime'
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# ============
+# === opt7 === miscellaneous climate group options
+# ============
+# >> tracer options <<
+# + agetracers = carry an idealized age tracer
+# + cfctracers = carry cfc-11 and cfc-12 as tracers
+# +  cjbcfcs     = use atmospheric time histories of CJ Beegle
+# +  gptcfcs     = use atmospheric time histories of GP Thiele
+# +  ccl4tracer  = carry a carbon tetrachloride tracer
+# + cybertra  = specify tracera as in cyber code
+# + saltnorm  = enables salt normalization; does not work when dtxcel varies
+# >> surface boundary condition options <<
+# + seasonal   = include seasonal cycle by cycling thru monthly
+#                surface boundary conditions (default, no cycle)
+# + cybervbc   = use surface boundary conditions from Cyber runs
+# + bctest     = on first timestep, compute zonal avg of sfc bc
+# + amazon     = mix amazon river outflow in 3 dimenstions
+# + r15vbc     = use bc dixon made for YMP runs
+# + noramp     = ignore ramp for surf boundary conditions
+# + noclinic   = set surface momentum fluxes to zero (debugging)
+# + notracer   = set surface tracer fluxes to zero (debugging)
+# +   windbc   = include wind and wind**3 surface boundary
+#                conditions from atmos model for wind mixing
+# >> other climate group options <<
+# + cpldleg1   = code changes for leg1 of coupled model runs
+# + cpldleg2   = code changes for leg2 of coupled model runs
+# + cpldleg3   = code changes for leg3 of coupled model runs
+# + atmcpld    = code changes for coupled air-sea model runs
+# + ocncpld    = code changes for coupled air-sea model runs
+# + oldstate   = replicate eq of state of Cyber runs
+# +  writekmt  = write the kmt array on stdout in topog.F
+# >> Options used if $t90_init == 1 <<
+# + t90_1st    = code to covert old Cray word data in 64 bit IEEE
+# -----------------------------------------------------------------------------
+#if ($t90_init == 1) then
+#   set opt7 = '-Dagetracers -Dseasonal -Dcpldleg3 -D t90_1st -D gotogtime '
+# else
+   set opt7 = '-Dagetracers -Dseasonal -Dcpldleg3 -Damazon -Docncpld'
+#endif
+#SGI test
+###set opt7 = "$opt7 -Dno_sfc_flux"
+#SGI test
 
-set opt1 = '-Dworldocn -Drigidlid -Dislands -Dhypergrid -Ddiskless -Df90type'
-set opt2 = '-Dcyclic -Dfourfil -Dbumpkmu -Dkm18 -Docnr30 '
-set opt3 = '-Dconsthmix -Disopycmix -Dblhmix -Dconstvmix -Dblvmix -Dinland'
-set opt4 = '-Dkeepterms -Dseaice'
-set opt5 = '-Dselfdoc -Dsfctopog -Dreadrmsk -Dkdtravg -Dkdtermb -Dtestnorth -Dzonalavg'
-set opt6 = '-Donetoone -Dgtime -Doldtime'
-set opt7 = '-Dagetracers -Dseasonal -Dcpldleg3 -Damazon -Docncpld'
-
-cp ../../model/atm/asblck.h .
-cp ../../model/atm/ascoma.h .
-cp ../../model/atm/ascomo.h .
-cp ../../model/atm/cexpnam.h .
-
-if ( -e denscoef.F ) /bin/rm denscoef.F
-
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+#
+  echo " opt1 = $opt1 "
+  echo " opt2 = $opt2 "
+  echo " opt3 = $opt3 "
+  echo " opt4 = $opt4 "
+  echo " opt5 = $opt5 "
+  echo " opt6 = $opt6 "
+  echo " opt7 = $opt7 "
+#
+############ end of ocn_ifdefs_sub ###################
+   cp ../../model/atm/asblck.h .
+   cp ../../model/atm/ascoma.h .
+   cp ../../model/atm/ascomo.h .
+   cp ../../model/atm/cexpnam.h .
+   #
+   #       remove unneeded code used to compute polynomial equation of state
+   #       (it is run just once offline before the experiment starts)
+   if ( -e denscoef.F ) /bin/rm denscoef.F
+   #
+   echo ">>>>>== COMPILING OCEAN CODE ==<<<<< "
 $FC $FFLAGS $INC_NETCDF $opt1 $opt2 $opt3 $opt4 $opt5 $opt6 $opt7 -c *.[fF]
-\rm ordleg.o
-cp *.o ..
+# ordleg all ready in atm *.o files
+   \rm ordleg.o
+   cp *.o ..
 
 # make executable
+
 cd ..
+
 $FC $FFLAGS *.o $LIB_NETCDF -o ctrs_06
 
+
+
+
 # run model
+
+
+# =====================================================
+# Start 'while' loop to time integrate 'endyear' years.
+# =====================================================
 set nyear = 1
 set endyear = 1
+#set endmonth = 12
 set endmonth = 1
 set lastmonth = 12
 set restart_path_lat = "$restart_path/initial"
 set prinito = "true"
-
 while ($nyear <= $endyear)
-    set imonth = 1
-    while ($imonth <= $endmonth)
-        # Note: dmget removed for local execution
-        cp $restart_path_lat/sstyce_r30.nc sstyce_r30_in.nc
-        cp $restart_path_lat/atmos_r30.nc atmos_r30_in.nc
-        cp $restart_path_lat/atm.intgls.r30 fort.77
-        cp $restart_path_lat/sealevel_r30.nc sealevel_r30_in.nc
+   #
+   # =====================================================
+   # Start 'while' loop to time integrate 'endmonth' months.
+   # =====================================================
+   #
+   set imonth = 1
+   while ($imonth <= $endmonth)
+      #
+      # =====================================================
+      # Assign and get non-history data files
+      # =====================================================
+      #
+      #source $SUB_DIR/ASSIGN_DMGET_SUB
+      # dmget $restart_path_lat/*.nc
+      cp $restart_path_lat/sstyce_r30.nc sstyce_r30_in.nc
+      cp $restart_path_lat/atmos_r30.nc atmos_r30_in.nc
+      cp $restart_path_lat/atm.intgls.r30 fort.77
+      cp $restart_path_lat/sealevel_r30.nc sealevel_r30_in.nc
 
-        cp $model_input_path/alb_kukla_r30.nc .
-        cp $model_input_path/ijrnf_r30.nc .
-        cp $model_input_path/zstarvar_r30.nc .
+      cp $model_input_path/alb_kukla_r30.nc .
+      cp $model_input_path/ijrnf_r30.nc .
+      cp $model_input_path/zstarvar_r30.nc .
 
-        cp $restart_path_lat/ocean_r30.nc ocean_r30_in.nc
-        cp $model_input_path/regionmasks .
-        cp $model_input_path/northmasks .
-        cp $model_input_path/terrserr_r30.nc .
+      cp $restart_path_lat/ocean_r30.nc ocean_r30_in.nc
+      cp $model_input_path/regionmasks .
+      cp $model_input_path/northmasks .
+      cp $model_input_path/terrserr_r30.nc .
 
-        # read_ctl section
-        mkdir read_ctl
-        cd read_ctl
-        cp $model_code_path/read_ctl/*.[fFh] .
-        sed -i '' -E 's/^[ \t]*include[ \t]+["'\''"]([^"'\'']+)["'\''"]/#include "\1"/i' *.[fF] *.[hH]
-        sed -i '' 's/#include .netcdf.inc./#include "netcdf.inc"/g' *.[fF] *.[hH]
+      #
+      # =====================================================
+      # Determine month and year for next integration
+      # =====================================================
+      #
 
-        $FC $FFLAGS_READCTL $INC_NETCDF *.[fF] $LIB_NETCDF -o a.out
+      # read_ctl section
+      mkdir read_ctl
+      cd read_ctl
+      # Read_ctl src code
+      cp $model_code_path/read_ctl/*.[fFh] .
+      sed -i -E 's/^[ \t]*include[ \t]+["'\''"]([^"'\'']+)["'\''"]/#include "\1"/i' *.[fF] *.[hH]
+      sed -i 's/#include .netcdf.inc./#include "netcdf.inc"/g' *.[fF] *.[hH]
 
-        cp a.out ../readr
-        cd ..
+      $FC $FFLAGS_READCTL $INC_NETCDF *.[fF] $LIB_NETCDF -o a.out
 
-        echo "  71" > fort.5
 
-        ./readr < fort.5
-        set irt = `cat irt.data`
-        setenv model_month `cat month.data`
-        set iyear = `cat iyear.data`
-        
-        @ yyear = $iyear
-        setenv model_year $yyear
+      cp a.out ../readr
+      cd ..
 
-        set count = 1
+      echo "  71" > fort.5
+
+      ./readr < fort.5
+      set irt = `cat irt.data`
+      setenv model_month `cat month.data`
+      set iyear = `cat iyear.data`
+      #
+      # Eliminate leading zeroes from model_year
+      # Note  model_year is passed to a number of other scripts.
+      #
+      @ yyear = $iyear
+      setenv model_year $yyear
+      #
+      # ... Determine number of days in month
+      #
+      set count = 1
+      # =====================================================
+      # compute ndays - the number of days in the month
+      # set model_year from shell variable
+      # =====================================================
+      #
+
         set month_list = (jan feb mar apr may jun jul aug sep oct nov dec)
         set days_list = (31 28 31 30 31 30 31 31 30 31 30 31)
 
         set model_month = $month_list[$imonth]
         set ndays = $days_list[$imonth]
-        set nnyear = $iyear
+
+      ##set model_year = $nnyear
+### test
+set nnyear = $iyear
+### test
         setenv model_year $nnyear
 
-        while ($month_list[$count] != $model_month)
-           @ count = $count + 1
-        end
-
-        if ($count > 12) then
+      while ($month_list[$count] != $model_month)
+         @ count = $count + 1
+      end
+   #
+         if ($count > 12) then
             echo "We have problems. count > 12, count= $count"
             exit
-        endif
-        set ndays = $days_list[$count]
+         endif
+         set ndays = $days_list[$count]
 
-        set alpha = 0.04
-        set dt = 216.0
-        set rk0 = 0.22e-6
-        set co2_equil = 360.0
-        set co2day_int = 5475
+      #
+      # =====================================================
+      # Assign history data files
+      # =====================================================
+      #
+      # not needed == source $SUB_DIR/ASSIGN_DMGET_HISTORY_SUB
+      #
+      # =====================================================
+      # Input data for the model
+      # =====================================================
+      #
+###      source $SUB_DIR/MODEL_INPUT_SUB
 
-        echo "ctrs_06   "                                         > fort.5
-        echo " &INDAT1 irt=$irt, NDAYS=$ndays         &END"  >> fort.5
-        echo " &INDAT2 ALPHA=$alpha, DT=$dt, RK0=$rk0 &END"  >> fort.5
-        echo " &INDAT3 intdk=10,ioprt=999999,intpr=80,intzm=80 &END"  >> fort.5
-        echo " &INHCO2 co2_equil=$co2_equil, co2day_int=$co2day_int  &END" >> fort.5
-        echo "" >> fort.5
+# atm section
+      set alpha = 0.04          # Robert smoothing constant in the atmos model
+      set dt = 216.0            # atmos model timestep in seconds
+      set rk0 = 0.22e-6         # gravity wave drag
+   #
+##INHCO2 === input for historical co2 runs (mods by kd)
+      set co2_equil = 360.0     # reference equilibrium CO2 from initial conditions [ppm]
+      set co2day_int = 5475   # ??? day number corresponding
+                            #     to 1 JAN 1765 of historical run
+#
 
-        set nyrdiag = 1
-        set nyrtavg = 1
-        set nyears = 1
-        set nyrdiag = `expr $nyrdiag \* 365 `
-        set nyrtavg = `expr $nyrtavg \* 365 `
-        set ndayso = $ndays
-        set ninit = ".false."
+   #
+   echo "ctrs_06   "                                     > fort.5
+   echo " &INDAT1 irt=$irt, NDAYS=$ndays         &END"  >> fort.5
+   echo " &INDAT2 ALPHA=$alpha, DT=$dt, RK0=$rk0 &END"  >> fort.5
+   echo " &INDAT3 intdk=10,ioprt=999999,intpr=80,intzm=80 &END"  >> fort.5
+   echo " &INHCO2 co2_equil=$co2_equil, co2day_int=$co2day_int  &END" >> fort.5
+   echo "" >> fort.5
+   #
+   cat fort.5
 
-        cat > ocean.in << DELIMIT
+#ocn section
+   set nyrdiag = 1        # interval of ocean model years for diagnostics
+   set nyrtavg = 1        # interval of ocean model years for tracer avgs
+   set nyears = 1         # number of years to run the ocean model each execution
+   set nyrdiag = `expr $nyrdiag \* 365 `
+   set nyrtavg = `expr $nyrtavg \* 365 `
+   set ndayso = $ndays
+#   if ( $init == 1 ) then
+#      set ninit = ".true."
+#   else
+      set ninit = ".false."
+#   endif
+   #
+#&contrl init=$ninit,  restrt=.true., avterm=0.,
+#        nmix=17,      eb=.true.,  ncon=6,  pintro=$prinito,
+#        days=$ndayso, tsi=0.0416, dgnstc=0.0416, travg=0.0416,
+#        histt=1.0,    snaps=99.9e9, prdiag=0.0416,
+#        nsteps=48,                             &end
+   cat > ocean.in << DELIMIT
  &contrl init=$ninit,  restrt=.true., avterm=0.,
          nmix=17,      eb=.true.,  ncon=6,  pintro=$prinito,
          days=$ndayso, tsi=0.0416, dgnstc=5.0, travg=5.,
          histt=1.0,    snaps=99.9e9, prdiag=30.0,
-         nsteps=48,                               &end
- &eddy   am=1.2e9,    fkpm=30.0,  aidif=1.0,
+         nsteps=48,                             &end
+ &eddy   am=1.2e9,   fkpm=30.0,  aidif=1.0,
          ah=0.4e7,  ahisop=1.0, slmxr=100.0,
          cdbot=0.001,
          afkph=0.65, dfkph=.74, sfkph=4.5e-5, zfkph=2500e2 &end
@@ -179,15 +462,35 @@ while ($nyear <= $endyear)
          acor=0.0                               &end
  &iland  alonis=110.0, alatis=-85.0,            &end
 DELIMIT
+   #
+   echo ">>>>>== CONTENTS OF ocean.in ==<<<<< "
+   cat ocean.in
 
-        sync
-        ./ctrs_06 < fort.5 > printout || set bomb = 1
+      #
+      # =====================================================
+      # =========>>>>>>>>>> Run the model <<<<<<<<<<=========
+      # =====================================================
+      #
+      sync
+      ./ctrs_06 < fort.5 > printout || set bomb = 1
 
-        if ($bomb < 0) cp printout $runscript_path/printout.new
+       if ($bomb < 0) cp printout $runscript_path/printout.new
+      #
 
-        @ imonth = $imonth + 1
-        set first_run = 0
-        set init = 0
-        set ninit = ".false."
-        set prinito = ".false."
-    end
+
+      #
+      # =====================================================
+      # Increment month
+      # =====================================================
+      #
+      @ imonth = $imonth + 1
+      set first_run = 0
+      set init = 0
+      set ninit = ".false."
+      set prinito = ".false."
+      #
+      # =====================================================
+      # End of 'imonth' while loop
+      # =====================================================
+   end
+
