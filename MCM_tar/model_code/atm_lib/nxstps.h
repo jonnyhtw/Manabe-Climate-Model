@@ -1,5 +1,0 @@
-      common / nxstep / vorm (mx,jx,kx), divm (mx,jx,kx)
-      common / nxstep / tm   (mx,jx,kx), psm  (mx,jx, 1)
-      common / nxstep / vordt(mx,jx,kx), divdt(mx,jx,kx)
-      common / nxstep / tdt  (mx,jx,kx), psdt (mx,jx, 1)
-      common / nxstep / ek   (mx,jx,kx)

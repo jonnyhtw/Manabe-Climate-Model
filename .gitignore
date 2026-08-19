@@ -4,3 +4,4 @@
 .ipynb_checkpoints
 printout*
 *run_dir
+.DS_store
